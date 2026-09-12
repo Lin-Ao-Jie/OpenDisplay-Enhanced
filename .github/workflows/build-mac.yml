@@ -40,12 +40,14 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName OpenDisplay Enhanced' "$APP/Contents/Info.plist" || /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string OpenDisplay Enhanced' "$APP/Contents/Info.plist"
           codesign --force --deep --sign - --timestamp=none "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          test "$(defaults read "$APP/Contents/Info" CFBundleIdentifier)" = 'io.github.linaojie.OpenDisplayEnhanced'
+          ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")
+          test "$ID" = 'io.github.linaojie.OpenDisplayEnhanced'
           mv "$APP" "$(dirname "$APP")/OpenDisplay Enhanced.app"
       - name: Package
         working-directory: opendisplay
         run: |
           APP='build/Build/Products/Release/OpenDisplay Enhanced.app'
+          test -d "$APP"
           ditto -c -k --sequesterRsrc --keepParent "$APP" '../OpenDisplay-Enhanced-macOS.zip'
       - uses: actions/upload-artifact@v4
         with:
