@@ -1,0 +1,165 @@
+diff --git a/ENHANCED_NEXT.md b/ENHANCED_NEXT.md
+new file mode 100644
+index 0000000..6752fda
+--- /dev/null
++++ b/ENHANCED_NEXT.md
+@@ -0,0 +1,21 @@
++# OpenDisplay Enhanced Next — Mac
++
++Implemented in this source snapshot:
++- Existing OpenDisplay 1.19 virtual-display/touch/pencil support
++- Unicode text injection for Android IME `text` messages
++- Editing/control key injection for `key` messages
++
++The matching Android Enhanced source is required for the new input messages.
++Audio, controller virtualization, Internet rendezvous/NAT traversal, clipboard, and expanded codec negotiation are not implemented in this snapshot.
++
++## Local cursor reclaim
++
++`InputInjector` now installs one listen-only CoreGraphics event tap while a virtual display session exists. It listens only for real `mouseMoved` events. OpenDisplay-generated pointer events carry a private `eventSourceUserData` marker and are ignored. If a physical Mac mouse/trackpad moves while the cursor is on the OpenDisplay virtual display, the cursor is warped to the corresponding normalized position on the main display.
++
++This is event-driven (no polling/timer), so it has effectively zero idle CPU cost. Disable with:
++
++    defaults write sh.peet.opensidecar.mac returnCursorToMainOnLocalInput -bool false
++
++Re-enable with:
++
++    defaults write sh.peet.opensidecar.mac returnCursorToMainOnLocalInput -bool true
+diff --git a/Mac/InputInjector.swift b/Mac/InputInjector.swift
+index 60b92f0..061ef2e 100644
+--- a/Mac/InputInjector.swift
++++ b/Mac/InputInjector.swift
+@@ -32,6 +32,11 @@ final class InputInjector {
+     // open but their tracking session breaks, leaving zombie menu windows
+     // composited on the display (visible in the stream, unclickable).
+     private let source = CGEventSource(stateID: .hidSystemState)
++    // Marks OpenDisplay-generated pointer events so the local-input monitor can
++    // ignore them without timers, polling, or global state.
++    private let syntheticMarker: Int64 = 0x4F444953 // "ODIS"
++    private var localMouseTap: CFMachPort?
++    private var localMouseTapSource: CFRunLoopSource?
+     // Synthetic OpenDisplay tablet — conspicuous in logs; not Wacom (0x056A) or
+     // typical small driver IDs (1, 2, …).
+     private let tabletVendorID: Int64 = 0x0D15       // "ODIS"
+@@ -60,6 +65,53 @@ final class InputInjector {
+ 
+     init(displayID: CGDirectDisplayID) {
+         self.displayID = displayID
++        startLocalMouseReturn()
++    }
++
++    deinit { stopLocalMouseReturn() }
++
++    /// A real Mac mouse/trackpad movement should immediately reclaim the cursor
++    /// from the tablet display. Event-driven: zero polling/idle CPU cost.
++    private func startLocalMouseReturn() {
++        guard UserDefaults.standard.object(forKey: "returnCursorToMainOnLocalInput") as? Bool ?? true else { return }
++        let mask = CGEventMask(1 << CGEventType.mouseMoved.rawValue)
++        let refcon = Unmanaged.passUnretained(self).toOpaque()
++        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap,
++                                          place: .headInsertEventTap,
++                                          options: .listenOnly,
++                                          eventsOfInterest: mask,
++                                          callback: { _, type, event, refcon in
++            guard type == .mouseMoved, let refcon else { return Unmanaged.passUnretained(event) }
++            let me = Unmanaged<InputInjector>.fromOpaque(refcon).takeUnretainedValue()
++            if event.getIntegerValueField(.eventSourceUserData) != me.syntheticMarker {
++                me.returnCursorToMainIfNeeded(from: event.location)
++            }
++            return Unmanaged.passUnretained(event)
++        }, userInfo: refcon) else { return }
++        localMouseTap = tap
++        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
++        localMouseTapSource = src
++        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
++        CGEvent.tapEnable(tap: tap, enable: true)
++    }
++
++    private func stopLocalMouseReturn() {
++        if let src = localMouseTapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
++        if let tap = localMouseTap { CGEvent.tapEnable(tap: tap, enable: false) }
++        localMouseTapSource = nil
++        localMouseTap = nil
++    }
++
++    private func returnCursorToMainIfNeeded(from p: CGPoint) {
++        let tablet = CGDisplayBounds(displayID)
++        guard tablet.contains(p) else { return }
++        let main = CGMainDisplayID()
++        let target = CGDisplayBounds(main)
++        guard target.width > 0, target.height > 0, tablet.width > 0, tablet.height > 0 else { return }
++        let nx = min(1, max(0, (p.x - tablet.minX) / tablet.width))
++        let ny = min(1, max(0, (p.y - tablet.minY) / tablet.height))
++        CGWarpMouseCursorPosition(CGPoint(x: target.minX + nx * target.width,
++                                          y: target.minY + ny * target.height))
+     }
+ 
+     static func ensureAccessibilityPermission() -> Bool {
+@@ -110,9 +162,44 @@ final class InputInjector {
+         guard let event = CGEvent(mouseEventSource: source, mouseType: type,
+                                   mouseCursorPosition: point, mouseButton: .left) else { return }
+         event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
++        event.setIntegerValueField(.eventSourceUserData, value: syntheticMarker)
+         event.post(tap: .cghidEventTap)
+     }
+ 
++    /// Commits Unicode text received from an Android IME. Using a Unicode
++    /// keyboard event preserves composed text (including CJK and emoji) instead
++    /// of pretending every character has a US keyboard virtual-key mapping.
++    func handleText(_ text: String) {
++        guard !text.isEmpty,
++              let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
++              let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
++        let units = Array(text.utf16)
++        units.withUnsafeBufferPointer { buf in
++            down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: buf.baseAddress!)
++            up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: buf.baseAddress!)
++        }
++        down.post(tap: .cghidEventTap)
++        up.post(tap: .cghidEventTap)
++    }
++
++    /// Editing keys that cannot be represented as committed Unicode text.
++    func handleKey(_ key: String) {
++        let code: CGKeyCode
++        switch key {
++        case "backspace": code = 51
++        case "enter": code = 36
++        case "tab": code = 48
++        case "escape": code = 53
++        case "left": code = 123
++        case "right": code = 124
++        case "down": code = 125
++        case "up": code = 126
++        default: return
++        }
++        CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)?.post(tap: .cghidEventTap)
++        CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)?.post(tap: .cghidEventTap)
++    }
++
+     /// dx/dy in display pixels, natural-scrolling sign from the phone.
+     /// Scroll events take points, so convert via the display's pixel scale.
+     func handleScroll(dx: Double, dy: Double) {
+@@ -216,6 +303,7 @@ final class InputInjector {
+ 
+         guard let ev = CGEvent(mouseEventSource: source, mouseType: type,
+                                mouseCursorPosition: p, mouseButton: .left) else { return }
++        ev.setIntegerValueField(.eventSourceUserData, value: syntheticMarker)
+         ev.setIntegerValueField(.mouseEventDeltaX, value: 0)
+         ev.setIntegerValueField(.mouseEventDeltaY, value: 0)
+         ev.setIntegerValueField(.mouseEventSubtype, value: Int64(CGEventMouseSubtype.tabletPoint.rawValue))
+diff --git a/Mac/MacSender.swift b/Mac/MacSender.swift
+index 582e85f..dd4408c 100644
+--- a/Mac/MacSender.swift
++++ b/Mac/MacSender.swift
+@@ -1775,6 +1775,10 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
+             if let dx = obj["dx"] as? Double, let dy = obj["dy"] as? Double {
+                 inputInjector?.handleScroll(dx: dx, dy: dy)
+             }
++        case "text":
++            if let text = obj["text"] as? String { inputInjector?.handleText(text) }
++        case "key":
++            if let key = obj["key"] as? String { inputInjector?.handleKey(key) }
+         case "pencil":
+             if let phase = obj["phase"] as? String,
+                let x = obj["x"] as? Double,
