@@ -17,11 +17,23 @@ jobs:
           repository: peetzweg/opendisplay
           ref: v1.19.0
           path: opendisplay
-      - name: Apply Enhanced patch
+      - name: Apply validated Enhanced patch
         working-directory: opendisplay
         run: |
           git apply --check ../patches/mac-enhanced.patch
           git apply ../patches/mac-enhanced.patch
+      - name: Harden cursor reclaim against hot corners
+        working-directory: opendisplay
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Mac/InputInjector.swift')
+          s=p.read_text()
+          s=s.replace('guard tablet.width > 0, tablet.height > 0, main.width > 4, main.height > 4 else { return }','guard tablet.width > 0, tablet.height > 0, main.width > 96, main.height > 96 else { return }')
+          s=s.replace('let inset: CGFloat = 2','let inset: CGFloat = 4\n        let cornerInset: CGFloat = 48')
+          s=s.replace('target.x = min(main.maxX - inset, max(main.minX + inset, target.x))\n        target.y = min(main.maxY - inset, max(main.minY + inset, target.y))','target.x = min(main.maxX - cornerInset, max(main.minX + cornerInset, target.x))\n        target.y = min(main.maxY - cornerInset, max(main.minY + cornerInset, target.y))')
+          p.write_text(s)
+          PY
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
