@@ -3,50 +3,28 @@ name: Build OpenDisplay Enhanced macOS
   workflow_dispatch: {}
   push:
     paths:
-      - '.github/workflows/build-mac.yml'
+      - .github/workflows/build-mac.yml
+      - scripts/patch_mac_v4.py
 jobs:
   build:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: peetzweg/opendisplay
           ref: v1.19.0
-      - name: Apply resolution command
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('Mac/MacSender.swift')
-          s=p.read_text()
-          marker='        case "pencil":'
-          add='''        case "resolution":
-              if mode == .extend, let width = obj["width"] as? Int, let height = obj["height"] as? Int, width >= 640, height >= 480, var info = lastHello {
-                  info.pixelsWide = width * 2
-                  info.pixelsHigh = height * 2
-                  lastHello = info
-                  Task { await self.reconfigure(info) }
-              }
-'''
-          assert marker in s
-          p.write_text(s.replace(marker, add + marker, 1))
-          PY
+          path: macsrc
+      - name: Apply changes
+        run: cd macsrc && python3 ../scripts/patch_mac_v4.py
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
-        run: ./generate.sh
+        run: cd macsrc && ./generate.sh
       - name: Build Release
-        run: xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-      - name: Sign and package
-        run: |
-          APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
-          test -n "$APP"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier io.github.linaojie.OpenDisplayEnhanced' "$APP/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleName OpenDisplay Enhanced' "$APP/Contents/Info.plist" || true
-          /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName OpenDisplay Enhanced' "$APP/Contents/Info.plist" || /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string OpenDisplay Enhanced' "$APP/Contents/Info.plist"
-          codesign --force --deep --sign - --timestamp=none "$APP"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          mv "$APP" "$(dirname "$APP")/OpenDisplay Enhanced.app"
-          ditto -c -k --sequesterRsrc --keepParent 'build/Build/Products/Release/OpenDisplay Enhanced.app' 'OpenDisplay-Enhanced-macOS-v4.zip'
+        run: cd macsrc && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Sign package
+        run: cd macsrc && APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1) && test -n "$APP" && /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier io.github.linaojie.OpenDisplayEnhanced' "$APP/Contents/Info.plist" && codesign --force --deep --sign - --timestamp=none "$APP" && codesign --verify --deep --strict --verbose=2 "$APP" && ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS-v4.zip
       - uses: actions/upload-artifact@v4
         with:
           name: OpenDisplay-Enhanced-macOS-v4
