@@ -1,10 +1,10 @@
-name: Build OpenDisplay Enhanced Android
+name: Build OpenDisplay PiP Fix Android
 'on':
   workflow_dispatch: {}
   push:
     paths:
       - .github/workflows/build-android.yml
-      - scripts/patch_android.py
+      - scripts/apply_pipfix_only.py
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,18 +14,18 @@ jobs:
         with:
           repository: josepacelli/opendisplay-android
           ref: v0.0.37
-          path: clean-android
-      - name: Apply audio and retained changes to clean upstream
-        run: cd clean-android && python3 ../scripts/patch_android.py
+          path: android
+      - name: Apply PiP background fix only
+        run: cd android && python3 ../scripts/apply_pipfix_only.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: Build clean APK
-        run: cd clean-android && chmod +x gradlew && ./gradlew clean assembleDebug --stacktrace
+      - name: Build APK
+        run: cd android && chmod +x gradlew && ./gradlew clean assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenDisplay-Enhanced-Android-Audio-v6-clean
-          path: clean-android/app/build/outputs/apk/debug/app-debug.apk
+          name: OpenDisplay-Android-0.0.37-PiPFix
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
