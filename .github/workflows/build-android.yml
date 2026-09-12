@@ -15,7 +15,7 @@ jobs:
           repository: josepacelli/opendisplay-android
           ref: v0.0.37
           path: android
-      - name: Apply resolution changes
+      - name: Apply Enhanced audio changes
         run: cd android && python3 ../scripts/patch_android.py
       - uses: actions/setup-java@v4
         with:
@@ -26,6 +26,6 @@ jobs:
         run: cd android && chmod +x gradlew && ./gradlew assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenDisplay-Enhanced-Android
+          name: OpenDisplay-Enhanced-Android-Audio-v5
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
