@@ -13,94 +13,32 @@ jobs:
     steps:
       - name: Checkout build repository
         uses: actions/checkout@v4
-
       - name: Checkout OpenDisplay 1.19.0
         uses: actions/checkout@v4
         with:
           repository: peetzweg/opendisplay
           ref: v1.19.0
           path: opendisplay
-
-      - name: Apply known-good Enhanced patch
-        working-directory: opendisplay
-        run: git apply ../patches/mac-enhanced.patch
-
-      - name: Apply cursor reclaim v2
+      - name: Validate and apply Enhanced patch
         working-directory: opendisplay
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('Mac/InputInjector.swift')
-          s=p.read_text()
-          s=s.replace('private var localMouseTapSource: CFRunLoopSource?\n', 'private var localMouseTapSource: CFRunLoopSource?\n    private var remoteOwnsCursor = false\n')
-          s=s.replace('if event.getIntegerValueField(.eventSourceUserData) != me.syntheticMarker {\n                me.returnCursorToMainIfNeeded(from: event.location)\n            }', 'if me.remoteOwnsCursor && event.getIntegerValueField(.eventSourceUserData) != me.syntheticMarker {\n                me.reclaimCursorToMain(from: event.location)\n            }')
-          old='''    private func returnCursorToMainIfNeeded(from p: CGPoint) {
-        let tablet = CGDisplayBounds(displayID)
-        guard tablet.contains(p) else { return }
-        let main = CGMainDisplayID()
-        let target = CGDisplayBounds(main)
-        guard target.width > 0, target.height > 0, tablet.width > 0, tablet.height > 0 else { return }
-        let nx = min(1, max(0, (p.x - tablet.minX) / tablet.width))
-        let ny = min(1, max(0, (p.y - tablet.minY) / tablet.height))
-        CGWarpMouseCursorPosition(CGPoint(x: target.minX + nx * target.width,
-                                          y: target.minY + ny * target.height))
-    }'''
-          new='''    private func reclaimCursorToMain(from p: CGPoint) {
-        remoteOwnsCursor = false
-        let tablet = CGDisplayBounds(displayID)
-        let main = CGDisplayBounds(CGMainDisplayID())
-        guard tablet.width > 0, tablet.height > 0, main.width > 4, main.height > 4 else { return }
-        let nx = min(1, max(0, (p.x - tablet.minX) / tablet.width))
-        let ny = min(1, max(0, (p.y - tablet.minY) / tablet.height))
-        let inset: CGFloat = 2
-        var target = CGPoint(x: main.minX + nx * main.width, y: main.minY + ny * main.height)
-        if tablet.minX >= main.maxX { target.x = main.maxX - inset }
-        else if tablet.maxX <= main.minX { target.x = main.minX + inset }
-        else if tablet.minY >= main.maxY { target.y = main.maxY - inset }
-        else if tablet.maxY <= main.minY { target.y = main.minY + inset }
-        target.x = min(main.maxX - inset, max(main.minX + inset, target.x))
-        target.y = min(main.maxY - inset, max(main.minY + inset, target.y))
-        CGWarpMouseCursorPosition(target)
-    }'''
-          if old not in s: raise SystemExit('old reclaim function not found')
-          s=s.replace(old,new)
-          s=s.replace('func handleTouch(phase: String, x: Double, y: Double) {\n', 'func handleTouch(phase: String, x: Double, y: Double) {\n        remoteOwnsCursor = true\n',1)
-          marker='''    func handlePencil(phase: String, x: Double, y: Double,
-                      pressure: Double, azimuth: Double, altitude: Double,
-                      rotation: Double) {
-'''
-          if marker not in s: raise SystemExit('pencil function not found')
-          s=s.replace(marker, marker+'        remoteOwnsCursor = true\n',1)
-          p.write_text(s)
-          PY
-
+          git apply --check ../patches/mac-enhanced.patch
+          git apply ../patches/mac-enhanced.patch
       - name: Install XcodeGen
         run: brew install xcodegen
-
       - name: Generate Xcode project
         working-directory: opendisplay
         run: ./generate.sh
-
       - name: Build unsigned Release app
         working-directory: opendisplay
         run: |
-          xcodebuild \
-            -project OpenSidecar.xcodeproj \
-            -scheme OpenSidecarMac \
-            -configuration Release \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            build
-
-      - name: Locate and package app
+          xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Package app
         working-directory: opendisplay
         run: |
           APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
           test -n "$APP"
-          echo "Built: $APP"
           ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS.zip
-
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
         with:
