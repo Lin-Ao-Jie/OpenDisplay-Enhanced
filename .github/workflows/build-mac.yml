@@ -1,9 +1,11 @@
 name: Build OpenDisplay Enhanced macOS
-'on':
-  workflow_dispatch: {}
+
+on:
+  workflow_dispatch:
   push:
     paths:
       - .github/workflows/build-mac.yml
+
 jobs:
   build:
     runs-on: macos-15
@@ -16,34 +18,19 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('Mac/InputInjector.swift'); s=p.read_text()
-          marker='    /// dx/dy in display pixels, natural-scrolling sign from the phone.'
-          add='''    func handleText(_ text: String) {
-              guard !text.isEmpty, let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true), let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
-              let units = Array(text.utf16)
-              units.withUnsafeBufferPointer { buf in down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: buf.baseAddress!); up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: buf.baseAddress!) }
-              down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
-          }
-          func handleKey(_ key: String) {
-              let code: CGKeyCode
-              switch key { case "backspace": code=51; case "enter": code=36; case "tab": code=48; case "escape": code=53; case "left": code=123; case "right": code=124; case "down": code=125; case "up": code=126; default: return }
-              CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)?.post(tap: .cghidEventTap); CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)?.post(tap: .cghidEventTap)
-          }
-
-'''
-          assert marker in s; p.write_text(s.replace(marker,add+marker,1))
-          p=Path('Mac/MacSender.swift'); s=p.read_text(); marker='        case "pencil":'
-          add='''        case "text":
-              if let text = obj["text"] as? String { inputInjector?.handleText(text) }
-          case "key":
-              if let key = obj["key"] as? String { inputInjector?.handleKey(key) }
-          case "resolution":
+          p=Path('Mac/MacSender.swift')
+          s=p.read_text()
+          marker='        case "pencil":'
+          add='''        case "resolution":
               if mode == .extend, let width = obj["width"] as? Int, let height = obj["height"] as? Int, width >= 640, height >= 480, var info = lastHello {
-                  info.pixelsWide = width * 2; info.pixelsHigh = height * 2; lastHello = info
+                  info.pixelsWide = width * 2
+                  info.pixelsHigh = height * 2
+                  lastHello = info
                   Task { await self.reconfigure(info) }
               }
 '''
-          assert marker in s; p.write_text(s.replace(marker,add+marker,1))
+          assert marker in s
+          p.write_text(s.replace(marker,add+marker,1))
           PY
       - name: Install XcodeGen
         run: brew install xcodegen
