@@ -1,0 +1,60 @@
+name: Build Enhanced OpenDisplay macOS
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'patches/mac-enhanced.patch'
+      - '.github/workflows/build-mac.yml'
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout build repository
+        uses: actions/checkout@v4
+
+      - name: Checkout OpenDisplay 1.19.0
+        uses: actions/checkout@v4
+        with:
+          repository: peetzweg/opendisplay
+          ref: v1.19.0
+          path: opendisplay
+
+      - name: Apply Enhanced patch
+        working-directory: opendisplay
+        run: git apply ../patches/mac-enhanced.patch
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: opendisplay
+        run: ./generate.sh
+
+      - name: Build unsigned Release app
+        working-directory: opendisplay
+        run: |
+          xcodebuild \
+            -project OpenSidecar.xcodeproj \
+            -scheme OpenSidecarMac \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Locate and package app
+        working-directory: opendisplay
+        run: |
+          APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
+          test -n "$APP"
+          echo "Built: $APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS.zip
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenDisplay-Enhanced-macOS
+          path: OpenDisplay-Enhanced-macOS.zip
+          if-no-files-found: error
