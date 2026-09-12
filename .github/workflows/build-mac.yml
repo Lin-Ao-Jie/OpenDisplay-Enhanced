@@ -24,9 +24,9 @@ jobs:
       - name: Build Release
         run: cd macsrc && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
       - name: Sign package
-        run: cd macsrc && APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1) && test -n "$APP" && /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier io.github.linaojie.OpenDisplayEnhanced' "$APP/Contents/Info.plist" && codesign --force --deep --sign - --timestamp=none "$APP" && codesign --verify --deep --strict --verbose=2 "$APP" && ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS-v4.zip
+        run: cd macsrc && APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1) && test -n "$APP" && /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier io.github.linaojie.OpenDisplayEnhanced' "$APP/Contents/Info.plist" && codesign --force --deep --sign - --timestamp=none "$APP" && codesign --verify --deep --strict --verbose=2 "$APP" && ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS-Audio-v5.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenDisplay-Enhanced-macOS-v4
-          path: OpenDisplay-Enhanced-macOS-v4.zip
+          name: OpenDisplay-Enhanced-macOS-Audio-v5
+          path: OpenDisplay-Enhanced-macOS-Audio-v5.zip
           if-no-files-found: error
