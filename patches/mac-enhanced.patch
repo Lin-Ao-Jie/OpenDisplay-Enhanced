@@ -16,7 +16,7 @@ index 0000000..6752fda
 +
 +## Local cursor reclaim
 +
-+Cursor reclaim is armed only after OpenDisplay touch/stylus input controls the pointer. The next real Mac mouse/trackpad movement returns the pointer to the nearest edge of the main display, preserving its relative position along that edge. OpenDisplay-generated events are tagged and ignored.
++`InputInjector` now installs one listen-only CoreGraphics event tap while a virtual display session exists. It listens only for real `mouseMoved` events. OpenDisplay-generated pointer events carry a private `eventSourceUserData` marker and are ignored. If a physical Mac mouse/trackpad moves while the cursor is on the OpenDisplay virtual display, the cursor is warped to the corresponding normalized position on the main display.
 +
 +This is event-driven (no polling/timer), so it has effectively zero idle CPU cost. Disable with:
 +
@@ -26,23 +26,22 @@ index 0000000..6752fda
 +
 +    defaults write sh.peet.opensidecar.mac returnCursorToMainOnLocalInput -bool true
 diff --git a/Mac/InputInjector.swift b/Mac/InputInjector.swift
-index 60b92f0..0b4f102 100644
+index 60b92f0..061ef2e 100644
 --- a/Mac/InputInjector.swift
 +++ b/Mac/InputInjector.swift
-@@ -32,6 +32,12 @@ final class InputInjector {
+@@ -32,6 +32,11 @@ final class InputInjector {
      // open but their tracking session breaks, leaving zombie menu windows
      // composited on the display (visible in the stream, unclickable).
      private let source = CGEventSource(stateID: .hidSystemState)
++    // Marks OpenDisplay-generated pointer events so the local-input monitor can
++    // ignore them without timers, polling, or global state.
 +    private let syntheticMarker: Int64 = 0x4F444953 // "ODIS"
 +    private var localMouseTap: CFMachPort?
 +    private var localMouseTapSource: CFRunLoopSource?
-+    // Reclaim only after remote touch/pen actually moved the pointer. This avoids
-+    // hijacking normal physical-mouse travel onto the OpenDisplay screen.
-+    private var remoteOwnsCursor = false
      // Synthetic OpenDisplay tablet — conspicuous in logs; not Wacom (0x056A) or
      // typical small driver IDs (1, 2, …).
      private let tabletVendorID: Int64 = 0x0D15       // "ODIS"
-@@ -60,6 +66,70 @@ final class InputInjector {
+@@ -60,6 +65,53 @@ final class InputInjector {
  
      init(displayID: CGDirectDisplayID) {
          self.displayID = displayID
@@ -51,6 +50,8 @@ index 60b92f0..0b4f102 100644
 +
 +    deinit { stopLocalMouseReturn() }
 +
++    /// A real Mac mouse/trackpad movement should immediately reclaim the cursor
++    /// from the tablet display. Event-driven: zero polling/idle CPU cost.
 +    private func startLocalMouseReturn() {
 +        guard UserDefaults.standard.object(forKey: "returnCursorToMainOnLocalInput") as? Bool ?? true else { return }
 +        let mask = CGEventMask(1 << CGEventType.mouseMoved.rawValue)
@@ -62,11 +63,9 @@ index 60b92f0..0b4f102 100644
 +                                          callback: { _, type, event, refcon in
 +            guard type == .mouseMoved, let refcon else { return Unmanaged.passUnretained(event) }
 +            let me = Unmanaged<InputInjector>.fromOpaque(refcon).takeUnretainedValue()
-+            guard me.remoteOwnsCursor,
-+                  event.getIntegerValueField(.eventSourceUserData) != me.syntheticMarker else {
-+                return Unmanaged.passUnretained(event)
++            if event.getIntegerValueField(.eventSourceUserData) != me.syntheticMarker {
++                me.returnCursorToMainIfNeeded(from: event.location)
 +            }
-+            me.reclaimCursorToMain(from: event.location)
 +            return Unmanaged.passUnretained(event)
 +        }, userInfo: refcon) else { return }
 +        localMouseTap = tap
@@ -83,43 +82,20 @@ index 60b92f0..0b4f102 100644
 +        localMouseTap = nil
 +    }
 +
-+    private func reclaimCursorToMain(from p: CGPoint) {
-+        remoteOwnsCursor = false // disarm before warping so the warp cannot recurse
++    private func returnCursorToMainIfNeeded(from p: CGPoint) {
 +        let tablet = CGDisplayBounds(displayID)
-+        let main = CGDisplayBounds(CGMainDisplayID())
-+        guard tablet.width > 0, tablet.height > 0, main.width > 4, main.height > 4 else { return }
-+
++        guard tablet.contains(p) else { return }
++        let main = CGMainDisplayID()
++        let target = CGDisplayBounds(main)
++        guard target.width > 0, target.height > 0, tablet.width > 0, tablet.height > 0 else { return }
 +        let nx = min(1, max(0, (p.x - tablet.minX) / tablet.width))
 +        let ny = min(1, max(0, (p.y - tablet.minY) / tablet.height))
-+        let inset: CGFloat = 2
-+        var target = CGPoint(x: main.minX + nx * main.width,
-+                             y: main.minY + ny * main.height)
-+
-+        // Enter the main display from the edge physically nearest the tablet.
-+        if tablet.minX >= main.maxX {
-+            target.x = main.maxX - inset
-+        } else if tablet.maxX <= main.minX {
-+            target.x = main.minX + inset
-+        } else if tablet.minY >= main.maxY {
-+            target.y = main.maxY - inset
-+        } else if tablet.maxY <= main.minY {
-+            target.y = main.minY + inset
-+        }
-+        target.x = min(main.maxX - inset, max(main.minX + inset, target.x))
-+        target.y = min(main.maxY - inset, max(main.minY + inset, target.y))
-+        CGWarpMouseCursorPosition(target)
++        CGWarpMouseCursorPosition(CGPoint(x: target.minX + nx * target.width,
++                                          y: target.minY + ny * target.height))
      }
  
      static func ensureAccessibilityPermission() -> Bool {
-@@ -71,6 +141,7 @@ final class InputInjector {
- 
-     /// x/y are normalized [0,1] in video space (origin top-left).
-     func handleTouch(phase: String, x: Double, y: Double) {
-+        remoteOwnsCursor = true
-         let bounds = CGDisplayBounds(displayID)   // global CG coords, y-down
-         let point = CGPoint(
-             x: bounds.origin.x + x * bounds.width,
-@@ -110,9 +181,44 @@ final class InputInjector {
+@@ -110,9 +162,44 @@ final class InputInjector {
          guard let event = CGEvent(mouseEventSource: source, mouseType: type,
                                    mouseCursorPosition: point, mouseButton: .left) else { return }
          event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
@@ -127,6 +103,9 @@ index 60b92f0..0b4f102 100644
          event.post(tap: .cghidEventTap)
      }
  
++    /// Commits Unicode text received from an Android IME. Using a Unicode
++    /// keyboard event preserves composed text (including CJK and emoji) instead
++    /// of pretending every character has a US keyboard virtual-key mapping.
 +    func handleText(_ text: String) {
 +        guard !text.isEmpty,
 +              let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
@@ -140,6 +119,7 @@ index 60b92f0..0b4f102 100644
 +        up.post(tap: .cghidEventTap)
 +    }
 +
++    /// Editing keys that cannot be represented as committed Unicode text.
 +    func handleKey(_ key: String) {
 +        let code: CGKeyCode
 +        switch key {
@@ -160,15 +140,7 @@ index 60b92f0..0b4f102 100644
      /// dx/dy in display pixels, natural-scrolling sign from the phone.
      /// Scroll events take points, so convert via the display's pixel scale.
      func handleScroll(dx: Double, dy: Double) {
-@@ -128,6 +234,7 @@ final class InputInjector {
-     func handlePencil(phase: String, x: Double, y: Double,
-                       pressure: Double, azimuth: Double, altitude: Double,
-                       rotation: Double) {
-+        remoteOwnsCursor = true
-         // TODO: Wire Apple Pencil Pro barrel roll (UIKit rollAngle) once hardware
-         // is available for testing. rotation on the wire is always 0 for now.
-         _ = rotation
-@@ -216,6 +323,7 @@ final class InputInjector {
+@@ -216,6 +303,7 @@ final class InputInjector {
  
          guard let ev = CGEvent(mouseEventSource: source, mouseType: type,
                                 mouseCursorPosition: p, mouseButton: .left) else { return }
