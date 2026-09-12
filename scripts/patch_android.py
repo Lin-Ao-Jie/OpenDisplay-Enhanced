@@ -11,12 +11,13 @@ method='''    fun setResolution(width: Int, height: Int) {
         _resolution.value = value
         appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putInt(KEY_RESOLUTION_WIDTH, value.width).putInt(KEY_RESOLUTION_HEIGHT, value.height).apply()
-        if (link != null) sendHello()
+        if (!value.isAuto) {
+            sendControl(JSONObject().put("type", "resolution").put("width", value.width).put("height", value.height))
+        }
     }
 
 '''
 assert marker in s; s=s.replace(marker,method+marker,1)
-s=s.replace('.put("pixelsWide", devicePixelsWide)\n            .put("pixelsHigh", devicePixelsHigh)', '.put("pixelsWide", if (_resolution.value.isAuto) devicePixelsWide else _resolution.value.width)\n            .put("pixelsHigh", if (_resolution.value.isAuto) devicePixelsHigh else _resolution.value.height)',1)
 end='    /** @return the current wall-clock time in milliseconds, as a [Double] (wire messages use floats). */'
 load='''    private fun loadResolution(): Resolution {
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -24,7 +25,23 @@ load='''    private fun loadResolution(): Resolution {
     }
 
 '''
-assert end in s; s=s.replace(end,load+end,1); p.write_text(s)
+assert end in s; s=s.replace(end,load+end,1)
+# Re-send persisted explicit resolution whenever a new Mac connection becomes ready.
+hello='''        sendHello()
+'''
+# First occurrence in connection setup is sufficient; delayed send lets hello initialize the Mac display first.
+idx=s.find(hello)
+assert idx >= 0
+s=s[:idx+len(hello)] + '''        val savedResolution = _resolution.value
+        if (!savedResolution.isAuto) {
+            scope.launch {
+                delay(500)
+                sendControl(JSONObject().put("type", "resolution").put("width", savedResolution.width).put("height", savedResolution.height))
+            }
+        }
+''' + s[idx+len(hello):]
+p.write_text(s)
+
 p=Path('app/src/main/java/io/github/josepacelli/opendisplay/ui/SettingsDialog.kt'); s=p.read_text()
 s=s.replace('val zoomEnabled by receiver.zoomEnabled.collectAsState()','val zoomEnabled by receiver.zoomEnabled.collectAsState()\n    val resolution by receiver.resolution.collectAsState()',1)
 s=s.replace('VideoSection(zoomEnabled, receiver::setZoomEnabled, modifier = Modifier.fillMaxWidth())','VideoSection(zoomEnabled, receiver::setZoomEnabled, modifier = Modifier.fillMaxWidth())\n                    ResolutionSection(resolution, receiver::setResolution, modifier = Modifier.fillMaxWidth())',1)
@@ -32,7 +49,7 @@ s=s.replace('VideoSection(zoomEnabled, receiver::setZoomEnabled)','VideoSection(
 marker='/** @param draftName'
 section='''@Composable
 private fun ResolutionSection(selected: PhoneReceiver.Resolution, onSelect: (Int, Int) -> Unit, modifier: Modifier = Modifier) {
-    val options = listOf(PhoneReceiver.Resolution(0,0) to "Auto / Native", PhoneReceiver.Resolution(1280,800) to "1280 × 800", PhoneReceiver.Resolution(1600,1000) to "1600 × 1000", PhoneReceiver.Resolution(1920,1200) to "1920 × 1200", PhoneReceiver.Resolution(2560,1600) to "2560 × 1600")
+    val options = listOf(PhoneReceiver.Resolution(1280,800) to "1280 × 800", PhoneReceiver.Resolution(1600,1000) to "1600 × 1000", PhoneReceiver.Resolution(1920,1200) to "1920 × 1200", PhoneReceiver.Resolution(2560,1600) to "2560 × 1600")
     SettingsSection(stringResource(R.string.settings_section_resolution), modifier) {
         Text(stringResource(R.string.settings_resolution_hint), style = MaterialTheme.typography.bodySmall)
         options.forEach { (v,label) -> FilterChip(selected = selected == v, onClick = { onSelect(v.width,v.height) }, label = { Text(label) }, modifier = Modifier.padding(top = 6.dp)) }
