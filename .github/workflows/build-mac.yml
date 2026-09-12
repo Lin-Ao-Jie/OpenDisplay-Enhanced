@@ -1,4 +1,4 @@
-name: Build Enhanced OpenDisplay macOS
+name: Build OpenDisplay Enhanced macOS
 
 on:
   workflow_dispatch:
@@ -11,45 +11,44 @@ jobs:
   build:
     runs-on: macos-15
     steps:
-      - name: Checkout build repository
-        uses: actions/checkout@v4
-      - name: Checkout OpenDisplay 1.19.0
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: peetzweg/opendisplay
           ref: v1.19.0
           path: opendisplay
-      - name: Validate and apply Enhanced patch
+      - name: Apply Enhanced patch
         working-directory: opendisplay
         run: |
           git apply --check ../patches/mac-enhanced.patch
           git apply ../patches/mac-enhanced.patch
       - name: Install XcodeGen
         run: brew install xcodegen
-      - name: Generate Xcode project
+      - name: Generate project
         working-directory: opendisplay
         run: ./generate.sh
-      - name: Build Release app
+      - name: Build Release
         working-directory: opendisplay
-        run: |
-          xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-      - name: Ad-hoc sign and verify
+        run: xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Set permanent Enhanced identity and sign
         working-directory: opendisplay
         run: |
           APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
           test -n "$APP"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier io.github.linaojie.OpenDisplayEnhanced' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleName OpenDisplay Enhanced' "$APP/Contents/Info.plist" || true
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName OpenDisplay Enhanced' "$APP/Contents/Info.plist" || /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string OpenDisplay Enhanced' "$APP/Contents/Info.plist"
           codesign --force --deep --sign - --timestamp=none "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign -dv --verbose=4 "$APP" 2>&1 | grep -E 'Identifier=|Signature=|TeamIdentifier=' || true
-      - name: Package app
+          test "$(defaults read "$APP/Contents/Info" CFBundleIdentifier)" = 'io.github.linaojie.OpenDisplayEnhanced'
+          mv "$APP" "$(dirname "$APP")/OpenDisplay Enhanced.app"
+      - name: Package
         working-directory: opendisplay
         run: |
-          APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
-          test -n "$APP"
-          ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS-adhoc.zip
-      - name: Upload app artifact
-        uses: actions/upload-artifact@v4
+          APP='build/Build/Products/Release/OpenDisplay Enhanced.app'
+          ditto -c -k --sequesterRsrc --keepParent "$APP" '../OpenDisplay-Enhanced-macOS.zip'
+      - uses: actions/upload-artifact@v4
         with:
-          name: OpenDisplay-Enhanced-macOS-adhoc
-          path: OpenDisplay-Enhanced-macOS-adhoc.zip
+          name: OpenDisplay-Enhanced-macOS
+          path: OpenDisplay-Enhanced-macOS.zip
           if-no-files-found: error
