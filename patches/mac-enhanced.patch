@@ -1,35 +1,8 @@
-diff --git a/ENHANCED_NEXT.md b/ENHANCED_NEXT.md
-new file mode 100644
-index 0000000..6752fda
---- /dev/null
-+++ b/ENHANCED_NEXT.md
-@@ -0,0 +1,21 @@
-+# OpenDisplay Enhanced Next — Mac
-+
-+Implemented in this source snapshot:
-+- Existing OpenDisplay 1.19 virtual-display/touch/pencil support
-+- Unicode text injection for Android IME `text` messages
-+- Editing/control key injection for `key` messages
-+
-+The matching Android Enhanced source is required for the new input messages.
-+Audio, controller virtualization, Internet rendezvous/NAT traversal, clipboard, and expanded codec negotiation are not implemented in this snapshot.
-+
-+## Local cursor reclaim
-+
-+`InputInjector` now installs one listen-only CoreGraphics event tap while a virtual display session exists. It listens only for real `mouseMoved` events. OpenDisplay-generated pointer events carry a private `eventSourceUserData` marker and are ignored. If a physical Mac mouse/trackpad moves while the cursor is on the OpenDisplay virtual display, the cursor is warped to the corresponding normalized position on the main display.
-+
-+This is event-driven (no polling/timer), so it has effectively zero idle CPU cost. Disable with:
-+
-+    defaults write sh.peet.opensidecar.mac returnCursorToMainOnLocalInput -bool false
-+
-+Re-enable with:
-+
-+    defaults write sh.peet.opensidecar.mac returnCursorToMainOnLocalInput -bool true
 diff --git a/Mac/InputInjector.swift b/Mac/InputInjector.swift
-index 60b92f0..061ef2e 100644
+index 60b92f0..84666fa 100644
 --- a/Mac/InputInjector.swift
 +++ b/Mac/InputInjector.swift
-@@ -32,6 +32,11 @@ final class InputInjector {
+@@ -32,6 +32,12 @@ final class InputInjector {
      // open but their tracking session breaks, leaving zombie menu windows
      // composited on the display (visible in the stream, unclickable).
      private let source = CGEventSource(stateID: .hidSystemState)
@@ -38,10 +11,11 @@ index 60b92f0..061ef2e 100644
 +    private let syntheticMarker: Int64 = 0x4F444953 // "ODIS"
 +    private var localMouseTap: CFMachPort?
 +    private var localMouseTapSource: CFRunLoopSource?
++    private var remoteOwnsCursor = false
      // Synthetic OpenDisplay tablet — conspicuous in logs; not Wacom (0x056A) or
      // typical small driver IDs (1, 2, …).
      private let tabletVendorID: Int64 = 0x0D15       // "ODIS"
-@@ -60,6 +65,53 @@ final class InputInjector {
+@@ -60,6 +66,59 @@ final class InputInjector {
  
      init(displayID: CGDirectDisplayID) {
          self.displayID = displayID
@@ -63,8 +37,8 @@ index 60b92f0..061ef2e 100644
 +                                          callback: { _, type, event, refcon in
 +            guard type == .mouseMoved, let refcon else { return Unmanaged.passUnretained(event) }
 +            let me = Unmanaged<InputInjector>.fromOpaque(refcon).takeUnretainedValue()
-+            if event.getIntegerValueField(.eventSourceUserData) != me.syntheticMarker {
-+                me.returnCursorToMainIfNeeded(from: event.location)
++            if me.remoteOwnsCursor && event.getIntegerValueField(.eventSourceUserData) != me.syntheticMarker {
++                me.reclaimCursorToMain(from: event.location)
 +            }
 +            return Unmanaged.passUnretained(event)
 +        }, userInfo: refcon) else { return }
@@ -82,20 +56,34 @@ index 60b92f0..061ef2e 100644
 +        localMouseTap = nil
 +    }
 +
-+    private func returnCursorToMainIfNeeded(from p: CGPoint) {
++    private func reclaimCursorToMain(from p: CGPoint) {
++        remoteOwnsCursor = false
 +        let tablet = CGDisplayBounds(displayID)
-+        guard tablet.contains(p) else { return }
-+        let main = CGMainDisplayID()
-+        let target = CGDisplayBounds(main)
-+        guard target.width > 0, target.height > 0, tablet.width > 0, tablet.height > 0 else { return }
++        let main = CGDisplayBounds(CGMainDisplayID())
++        guard tablet.width > 0, tablet.height > 0, main.width > 4, main.height > 4 else { return }
 +        let nx = min(1, max(0, (p.x - tablet.minX) / tablet.width))
 +        let ny = min(1, max(0, (p.y - tablet.minY) / tablet.height))
-+        CGWarpMouseCursorPosition(CGPoint(x: target.minX + nx * target.width,
-+                                          y: target.minY + ny * target.height))
++        let inset: CGFloat = 2
++        var target = CGPoint(x: main.minX + nx * main.width, y: main.minY + ny * main.height)
++        if tablet.minX >= main.maxX { target.x = main.maxX - inset }
++        else if tablet.maxX <= main.minX { target.x = main.minX + inset }
++        else if tablet.minY >= main.maxY { target.y = main.maxY - inset }
++        else if tablet.maxY <= main.minY { target.y = main.minY + inset }
++        target.x = min(main.maxX - inset, max(main.minX + inset, target.x))
++        target.y = min(main.maxY - inset, max(main.minY + inset, target.y))
++        CGWarpMouseCursorPosition(target)
      }
  
      static func ensureAccessibilityPermission() -> Bool {
-@@ -110,9 +162,44 @@ final class InputInjector {
+@@ -73,6 +132,7 @@ final class InputInjector {
+ 
+     /// x/y are normalized [0,1] in video space (origin top-left).
+     func handleTouch(phase: String, x: Double, y: Double) {
++        remoteOwnsCursor = true
+         let bounds = CGDisplayBounds(displayID)   // global CG coords, y-down
+         let point = CGPoint(
+             x: bounds.origin.x + x * bounds.width,
+@@ -110,9 +170,44 @@ final class InputInjector {
          guard let event = CGEvent(mouseEventSource: source, mouseType: type,
                                    mouseCursorPosition: point, mouseButton: .left) else { return }
          event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
@@ -140,7 +128,15 @@ index 60b92f0..061ef2e 100644
      /// dx/dy in display pixels, natural-scrolling sign from the phone.
      /// Scroll events take points, so convert via the display's pixel scale.
      func handleScroll(dx: Double, dy: Double) {
-@@ -216,6 +303,7 @@ final class InputInjector {
+@@ -133,6 +228,7 @@ final class InputInjector {
+     func handlePencil(phase: String, x: Double, y: Double,
+                       pressure: Double, azimuth: Double, altitude: Double,
+                       rotation: Double) {
++        remoteOwnsCursor = true
+         // TODO: Wire Apple Pencil Pro barrel roll (UIKit rollAngle) once hardware
+         // is available for testing. rotation on the wire is always 0 for now.
+         _ = rotation
+@@ -216,6 +312,7 @@ final class InputInjector {
  
          guard let ev = CGEvent(mouseEventSource: source, mouseType: type,
                                 mouseCursorPosition: p, mouseButton: .left) else { return }
