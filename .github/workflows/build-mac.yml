@@ -29,19 +29,27 @@ jobs:
       - name: Generate Xcode project
         working-directory: opendisplay
         run: ./generate.sh
-      - name: Build unsigned Release app
+      - name: Build Release app
         working-directory: opendisplay
         run: |
           xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Ad-hoc sign and verify
+        working-directory: opendisplay
+        run: |
+          APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
+          test -n "$APP"
+          codesign --force --deep --sign - --timestamp=none "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -E 'Identifier=|Signature=|TeamIdentifier=' || true
       - name: Package app
         working-directory: opendisplay
         run: |
           APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
           test -n "$APP"
-          ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS.zip
+          ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS-adhoc.zip
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenDisplay-Enhanced-macOS
-          path: OpenDisplay-Enhanced-macOS.zip
+          name: OpenDisplay-Enhanced-macOS-adhoc
+          path: OpenDisplay-Enhanced-macOS-adhoc.zip
           if-no-files-found: error
