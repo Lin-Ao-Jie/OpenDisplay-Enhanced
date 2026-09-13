@@ -1,4 +1,4 @@
-name: Build OpenDisplay PiP Fix Android
+name: Build OpenDisplay 0.0.38 Stable Android
 'on':
   workflow_dispatch: {}
   push:
@@ -13,9 +13,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: josepacelli/opendisplay-android
-          ref: v0.0.37
+          ref: v0.0.38
           path: android
-      - name: Apply PiP background fix only
+      - name: Apply proven PiP background fix only
         run: cd android && python3 ../scripts/apply_pipfix_only.py
       - uses: actions/setup-java@v4
         with:
@@ -26,6 +26,6 @@ jobs:
         run: cd android && chmod +x gradlew && ./gradlew clean assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenDisplay-Android-0.0.37-PiPFix
+          name: OpenDisplay-Android-0.0.38-Stable-PiP
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
