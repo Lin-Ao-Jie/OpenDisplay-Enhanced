@@ -1,10 +1,10 @@
-name: Build OpenDisplay Enhanced macOS
+name: Build OpenDisplay macOS Cursor Reclaim
 'on':
   workflow_dispatch: {}
   push:
     paths:
       - .github/workflows/build-mac.yml
-      - scripts/patch_mac_v4.py
+      - scripts/patch_mac_cursor_relative.py
 jobs:
   build:
     runs-on: macos-15
@@ -14,19 +14,19 @@ jobs:
         with:
           repository: peetzweg/opendisplay
           ref: v1.19.0
-          path: clean-mac
-      - name: Apply audio and retained changes to clean upstream
-        run: cd clean-mac && python3 ../scripts/patch_mac_v4.py
+          path: mac
+      - name: Apply proportional cursor reclaim only
+        run: cd mac && python3 ../scripts/patch_mac_cursor_relative.py
       - name: Install XcodeGen
         run: brew install xcodegen
-      - name: Generate clean project
-        run: cd clean-mac && ./generate.sh
-      - name: Build clean Release
-        run: cd clean-mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
-      - name: Sign and package clean app
-        run: cd clean-mac && APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1) && test -n "$APP" && /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier io.github.linaojie.OpenDisplayEnhanced' "$APP/Contents/Info.plist" && codesign --force --deep --sign - --timestamp=none "$APP" && codesign --verify --deep --strict --verbose=2 "$APP" && ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-Enhanced-macOS-Audio-v6-clean.zip
+      - name: Generate project
+        run: cd mac && ./generate.sh
+      - name: Build Release
+        run: cd mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
+      - name: Sign and package
+        run: cd mac && APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1) && test -n "$APP" && codesign --force --deep --sign - --timestamp=none "$APP" && codesign --verify --deep --strict --verbose=2 "$APP" && ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-macOS-1.19-CursorReclaim.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenDisplay-Enhanced-macOS-Audio-v6-clean
-          path: OpenDisplay-Enhanced-macOS-Audio-v6-clean.zip
+          name: OpenDisplay-macOS-1.19-CursorReclaim
+          path: OpenDisplay-macOS-1.19-CursorReclaim.zip
           if-no-files-found: error
