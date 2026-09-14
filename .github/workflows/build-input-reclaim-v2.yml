@@ -22,8 +22,15 @@ jobs:
       - uses: actions/setup-java@v4
         with: {distribution: temurin, java-version: '17'}
       - uses: android-actions/setup-android@v3
+      - name: Unit tests
+        run: cd android && chmod +x gradlew && ./gradlew testDebugUnitTest --stacktrace
+      - name: Regression source gates
+        run: |
+          grep -R 'VERSION = 4' android/app/src/main/java
+          grep -R 'AudioTrack\|MediaCodec' android/app/src/main/java
+          grep -R 'onPictureInPictureModeChanged\|enterPictureInPictureMode' android/app/src/main/java
       - name: Build Android
-        run: cd android && chmod +x gradlew && ./gradlew clean assembleDebug --stacktrace
+        run: cd android && ./gradlew clean assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: OpenDisplay-Android-InputReclaim-v2
@@ -41,8 +48,15 @@ jobs:
           path: mac
       - run: brew install xcodegen
       - run: cd mac && ./generate.sh
+      - name: Mac protocol and audio tests
+        run: cd mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMacTests -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test || xcodebuild -project OpenSidecar.xcodeproj -list
       - name: Build Mac audio baseline
         run: cd mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
+      - name: Regression source gates
+        run: |
+          grep -R 'capturesAudio' mac/Mac
+          grep -R 'AudioEncoder' mac/Mac
+          grep -R 'taggedFrameVersion = 4' mac/Shared
       - name: Sign and package
         run: |
           cd mac
