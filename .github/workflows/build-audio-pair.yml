@@ -1,0 +1,46 @@
+name: Build OpenDisplay Audio Pair
+'on':
+  push:
+    branches: [audio-pair]
+    paths: [.github/workflows/build-audio-pair.yml]
+  workflow_dispatch: {}
+jobs:
+  mac:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: M4st3rZeus/opendisplay
+          ref: d000262d29190fcb393665b6bab2a5cdd2bec2e7
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate
+        run: ./generate.sh
+      - name: Build
+        run: xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
+      - name: Preserve original identity and ad-hoc sign
+        run: |
+          APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
+          test -n "$APP"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.peetzweg.opensidecar.mac' "$APP/Contents/Info.plist"
+          codesign --force --deep --sign - --timestamp=none "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" OpenDisplay-macOS-Audio.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDisplay-macOS-Audio
+          path: OpenDisplay-macOS-Audio.zip
+          if-no-files-found: error
+  android:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: M4st3rZeus/opendisplay
+          ref: d000262d29190fcb393665b6bab2a5cdd2bec2e7
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate
+        run: ./generate.sh
+      - name: Build iOS receiver reference
+        run: xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecar -configuration Debug -sdk iphonesimulator -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
