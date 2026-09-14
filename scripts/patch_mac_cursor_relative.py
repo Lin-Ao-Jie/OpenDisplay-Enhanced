@@ -4,8 +4,6 @@ s=p.read_text()
 needle='final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {'
 assert needle in s
 s=s.replace(needle,needle+'''\n    private var cursorReclaimMonitor: Any?\n    private var cursorReclaimLastWarp: CFTimeInterval = 0\n''',1)
-# Install from the actual v1.19 initializer. Global mouseMoved reports physical
-# local pointer motion; the warp itself generates no mouse click/down/up.
 needle='''        self.awaitingWake = awaitingWake
         super.init()
     }
