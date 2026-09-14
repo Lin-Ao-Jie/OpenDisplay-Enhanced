@@ -1,0 +1,64 @@
+name: Build Keyboard v4
+'on':
+  push:
+    branches: [keyboard-v4-e2e]
+    paths: [.github/workflows/build-keyboard-v4.yml, scripts/**]
+  workflow_dispatch: {}
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: enhancements}
+      - uses: actions/checkout@v4
+        with: {repository: josepacelli/opendisplay-android, ref: v0.0.38, path: android}
+      - name: Stable PiP and audio
+        run: |
+          cd android
+          python3 ../enhancements/scripts/apply_pipfix_only.py
+          python3 ../enhancements/scripts/patch_android_audio_v38.py
+          python3 ../enhancements/scripts/patch_android_keyboard_v4.py
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v3
+      - name: Keyboard implementation gate
+        run: |
+          test -f android/app/src/main/java/io/github/josepacelli/opendisplay/ui/KeyboardBridgeView.kt
+          grep -q 'onCreateInputConnection' android/app/src/main/java/io/github/josepacelli/opendisplay/ui/KeyboardBridgeView.kt
+          grep -q 'showSoftInput' android/app/src/main/java/io/github/josepacelli/opendisplay/ui/KeyboardBridgeView.kt
+          grep -q 'commitText' android/app/src/main/java/io/github/josepacelli/opendisplay/ui/KeyboardBridgeView.kt
+      - name: Tests and compile
+        run: cd android && chmod +x gradlew && ./gradlew testDebugUnitTest assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with: {name: OpenDisplay-Android-Keyboard-v4, path: android/app/build/outputs/apk/debug/app-debug.apk, if-no-files-found: error}
+  mac:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: enhancements}
+      - uses: actions/checkout@v4
+        with: {repository: M4st3rZeus/opendisplay, ref: d000262d29190fcb393665b6bab2a5cdd2bec2e7, path: mac}
+      - name: Apply keyboard bridge
+        run: cd mac && python3 ../enhancements/scripts/patch_mac_keyboard_v4.py
+      - run: brew install xcodegen
+      - run: cd mac && ./generate.sh
+      - name: Keyboard implementation gate
+        run: |
+          test -f mac/Mac/KeyboardBridge.swift
+          grep -q 'AXFocusedUIElement' mac/Mac/KeyboardBridge.swift
+          grep -q 'keyboardShow' mac/Mac/KeyboardBridge.swift
+          grep -q 'CGEvent' mac/Mac/KeyboardBridge.swift
+          ! grep -R 'CGWarpMouseCursorPosition\|cursorReclaim' mac/Mac
+      - name: Compile
+        run: cd mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
+      - name: Sign package
+        run: |
+          cd mac
+          APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
+          test -n "$APP"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.peetzweg.opensidecar.mac' "$APP/Contents/Info.plist"
+          codesign --force --deep --sign - --timestamp=none "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-macOS-Keyboard-v4.zip
+      - uses: actions/upload-artifact@v4
+        with: {name: OpenDisplay-macOS-Keyboard-v4, path: OpenDisplay-macOS-Keyboard-v4.zip, if-no-files-found: error}
