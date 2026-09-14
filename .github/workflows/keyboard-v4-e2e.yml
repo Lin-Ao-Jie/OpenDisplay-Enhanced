@@ -1,0 +1,26 @@
+name: Keyboard v4 E2E
+'on':
+  push:
+    branches: [keyboard-v4-e2e]
+    paths: [.github/workflows/keyboard-v4-e2e.yml, scripts/**]
+  workflow_dispatch: {}
+jobs:
+  implementation-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require complete keyboard implementation before build
+        run: |
+          test -f scripts/patch_android_keyboard_v4.py
+          test -f scripts/patch_mac_keyboard_v4.py
+          grep -q 'InputConnection' scripts/patch_android_keyboard_v4.py
+          grep -q 'showSoftInput' scripts/patch_android_keyboard_v4.py
+          grep -q 'requestFocus' scripts/patch_android_keyboard_v4.py
+          grep -q 'commitText' scripts/patch_android_keyboard_v4.py
+          grep -q 'keyboardShow' scripts/patch_android_keyboard_v4.py
+          grep -q 'AXFocusedUIElement' scripts/patch_mac_keyboard_v4.py
+          grep -q 'AXTextField' scripts/patch_mac_keyboard_v4.py
+          grep -q 'keyboardShow' scripts/patch_mac_keyboard_v4.py
+          grep -q 'keyboardHide' scripts/patch_mac_keyboard_v4.py
+          grep -q 'CGEvent' scripts/patch_mac_keyboard_v4.py
+          ! grep -R 'CGWarpMouseCursorPosition\|cursorReclaim' scripts/patch_*keyboard_v4.py
