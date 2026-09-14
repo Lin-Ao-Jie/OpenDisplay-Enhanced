@@ -2,7 +2,7 @@ name: Build OpenDisplay Audio Pair
 'on':
   push:
     branches: [audio-pair]
-    paths: [.github/workflows/build-audio-pair.yml]
+    paths: [.github/workflows/build-audio-pair.yml, scripts/patch_android_audio_v38.py]
   workflow_dispatch: {}
 jobs:
   mac:
@@ -32,15 +32,27 @@ jobs:
           path: OpenDisplay-macOS-Audio.zip
           if-no-files-found: error
   android:
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: M4st3rZeus/opendisplay
-          ref: d000262d29190fcb393665b6bab2a5cdd2bec2e7
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate
-        run: ./generate.sh
-      - name: Build iOS receiver reference
-        run: xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecar -configuration Debug -sdk iphonesimulator -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          path: enhancements
+      - uses: actions/checkout@v4
+        with:
+          repository: josepacelli/opendisplay-android
+          ref: v0.0.38
+          path: android
+      - name: Apply protocol-4 AAC receiver
+        run: cd android && python3 ../enhancements/scripts/patch_android_audio_v38.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Build APK
+        run: cd android && chmod +x gradlew && ./gradlew clean assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDisplay-Android-0.0.38-Audio
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
