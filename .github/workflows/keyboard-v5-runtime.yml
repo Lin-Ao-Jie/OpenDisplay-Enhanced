@@ -1,0 +1,22 @@
+name: Keyboard v5 Runtime Wired
+'on':
+  push:
+    branches: [keyboard-v5-runtime-wired]
+  workflow_dispatch: {}
+jobs:
+  runtime-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require runtime integration before artifact build
+        run: |
+          test -f scripts/patch_android_keyboard_v5.py
+          test -f scripts/patch_mac_keyboard_v5.py
+          grep -q 'KeyboardBridgeView' scripts/patch_android_keyboard_v5.py
+          grep -q 'addView' scripts/patch_android_keyboard_v5.py
+          grep -q 'keyboardShow' scripts/patch_android_keyboard_v5.py
+          grep -q 'showKeyboard' scripts/patch_android_keyboard_v5.py
+          grep -q 'KeyboardBridge' scripts/patch_mac_keyboard_v5.py
+          grep -q 'pollAfterRemoteTouchUp' scripts/patch_mac_keyboard_v5.py
+          grep -q 'keyboardShow' scripts/patch_mac_keyboard_v5.py
+          grep -q 'keyboardText' scripts/patch_mac_keyboard_v5.py
