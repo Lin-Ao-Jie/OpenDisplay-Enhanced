@@ -1,0 +1,61 @@
+name: Build OpenDisplay Full Stable v38
+'on':
+  push:
+    branches: [full-stable-v38]
+    paths: [.github/workflows/build-full-stable-v38.yml, scripts/**]
+  workflow_dispatch: {}
+jobs:
+  mac:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: enhancements}
+      - uses: actions/checkout@v4
+        with:
+          repository: M4st3rZeus/opendisplay
+          ref: d000262d29190fcb393665b6bab2a5cdd2bec2e7
+          path: mac
+      - name: Apply proportional cursor reclaim
+        run: cd mac && python3 ../enhancements/scripts/patch_mac_cursor_audio.py
+      - run: brew install xcodegen
+      - run: cd mac && ./generate.sh
+      - name: Build Mac
+        run: cd mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
+      - name: Sign and package
+        run: |
+          cd mac
+          APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
+          test -n "$APP"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.peetzweg.opensidecar.mac' "$APP/Contents/Info.plist"
+          codesign --force --deep --sign - --timestamp=none "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-macOS-FullStable.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDisplay-macOS-FullStable
+          path: OpenDisplay-macOS-FullStable.zip
+          if-no-files-found: error
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: enhancements}
+      - uses: actions/checkout@v4
+        with:
+          repository: josepacelli/opendisplay-android
+          ref: v0.0.38
+          path: android
+      - name: Restore proven PiP/background reconnect
+        run: cd android && python3 ../enhancements/scripts/apply_pipfix_only.py
+      - name: Add protocol-4 AAC audio receiver
+        run: cd android && python3 ../enhancements/scripts/patch_android_audio_v38.py
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v3
+      - name: Build Android
+        run: cd android && chmod +x gradlew && ./gradlew clean assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDisplay-Android-0.0.38-FullStable
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
