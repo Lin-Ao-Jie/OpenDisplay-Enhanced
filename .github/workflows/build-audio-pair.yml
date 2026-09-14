@@ -1,8 +1,8 @@
-name: Build OpenDisplay Audio Pair
+name: Build OpenDisplay Enhanced Pair
 'on':
   push:
-    branches: [audio-pair]
-    paths: [.github/workflows/build-audio-pair.yml, scripts/patch_android_audio_v38.py]
+    branches: [keyboard-cursor-audio]
+    paths: [.github/workflows/build-audio-pair.yml, scripts/patch_android_audio_v38.py, scripts/patch_mac_cursor_audio.py]
   workflow_dispatch: {}
 jobs:
   mac:
@@ -10,26 +10,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          path: enhancements
+      - uses: actions/checkout@v4
+        with:
           repository: M4st3rZeus/opendisplay
           ref: d000262d29190fcb393665b6bab2a5cdd2bec2e7
+          path: mac
+      - name: Add proportional cursor reclaim
+        run: cd mac && python3 ../enhancements/scripts/patch_mac_cursor_audio.py
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate
-        run: ./generate.sh
+        run: cd mac && ./generate.sh
       - name: Build
-        run: xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
+        run: cd mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
       - name: Preserve original identity and ad-hoc sign
         run: |
+          cd mac
           APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
           test -n "$APP"
           /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.peetzweg.opensidecar.mac' "$APP/Contents/Info.plist"
           codesign --force --deep --sign - --timestamp=none "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          ditto -c -k --sequesterRsrc --keepParent "$APP" OpenDisplay-macOS-Audio.zip
+          ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-macOS-Audio-CursorReclaim.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenDisplay-macOS-Audio
-          path: OpenDisplay-macOS-Audio.zip
+          name: OpenDisplay-macOS-Audio-CursorReclaim
+          path: OpenDisplay-macOS-Audio-CursorReclaim.zip
           if-no-files-found: error
   android:
     runs-on: ubuntu-latest
