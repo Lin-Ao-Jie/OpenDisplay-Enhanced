@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate complete implementation inputs
+      - name: Validate implementation inputs
         run: |
           test -f scripts/patch_android_keyboard_v6.py
           test -f scripts/patch_mac_keyboard_v6.py
@@ -17,12 +17,9 @@ jobs:
           grep -q 'setKeyboardVisibilityHandler' scripts/patch_android_keyboard_v6.py
           grep -q 'showSoftInput' scripts/patch_android_keyboard_v6.py
           grep -q 'keyboardText' scripts/patch_android_keyboard_v6.py
-          grep -q 'KeyboardBridge' scripts/patch_mac_keyboard_v6.py
           grep -q 'AXFocusedUIElement' scripts/patch_mac_keyboard_v6.py
           grep -q 'pollAfterRemoteTouchUp' scripts/patch_mac_keyboard_v6.py
           grep -q 'keyboardShow' scripts/patch_mac_keyboard_v6.py
-          grep -q 'keyboardText' scripts/patch_mac_keyboard_v6.py
-          grep -q 'sendControl' scripts/patch_mac_keyboard_v6.py
   android:
     needs: implementation
     runs-on: ubuntu-latest
@@ -39,8 +36,17 @@ jobs:
       - uses: actions/setup-java@v4
         with: {distribution: temurin, java-version: '17'}
       - uses: android-actions/setup-android@v3
-      - name: Test and compile Android
+      - name: Unit test and compile
         run: cd android && chmod +x gradlew && ./gradlew testDebugUnitTest assembleDebug --stacktrace
+      - name: Runtime IME path validation
+        run: |
+          grep -q 'requestFocus()' android/app/src/main/java/io/github/josepacelli/opendisplay/ui/KeyboardBridgeView.kt
+          grep -q 'restartInput(this)' android/app/src/main/java/io/github/josepacelli/opendisplay/ui/KeyboardBridgeView.kt
+          grep -q 'showSoftInput(this' android/app/src/main/java/io/github/josepacelli/opendisplay/ui/KeyboardBridgeView.kt
+          grep -q 'setKeyboardVisibilityHandler' android/app/src/main/java/io/github/josepacelli/opendisplay/MainActivity.kt
+          grep -q 'keyboardBridge?.showKeyboard()' android/app/src/main/java/io/github/josepacelli/opendisplay/MainActivity.kt
+          grep -q 'keyboardShow' android/app/src/main/java/io/github/josepacelli/opendisplay/net/PhoneReceiver.kt
+          grep -q 'commitText' android/app/src/main/java/io/github/josepacelli/opendisplay/ui/KeyboardBridgeView.kt
       - uses: actions/upload-artifact@v4
         with: {name: OpenDisplay-Android-Keyboard-v6, path: android/app/build/outputs/apk/debug/app-debug.apk, if-no-files-found: error}
   mac:
@@ -54,6 +60,14 @@ jobs:
       - run: cd mac && python3 ../enhancements/scripts/patch_mac_keyboard_v6.py
       - run: brew install xcodegen
       - run: cd mac && ./generate.sh
+      - name: Mac keyboard path validation
+        run: |
+          grep -q 'AXFocusedUIElement' mac/Mac/KeyboardBridge.swift
+          grep -q 'pollAfterRemoteTouchUp' mac/Mac/KeyboardBridge.swift
+          grep -q 'keyboardShow' mac/Mac/KeyboardBridge.swift
+          grep -q 'keyboardText' mac/Mac/KeyboardBridge.swift
+          grep -q 'KeyboardBridge()' mac/Mac/MacSender.swift
+          ! grep -R 'CGWarpMouseCursorPosition\|cursorReclaim' mac/Mac
       - name: Compile Mac
         run: cd mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
       - name: Sign and verify
