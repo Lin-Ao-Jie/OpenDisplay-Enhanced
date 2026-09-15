@@ -34,8 +34,9 @@ p=base/'net/PhoneReceiver.kt';s=p.read_text();anchor='''    private fun sendCont
     fun setKeyboardVisibilityHandler(h:(Boolean)->Unit){keyboardVisibilityHandler=h}
     fun sendKeyboardControl(json:JSONObject){sendControl(json)}
 ''',1)
-# route raw JSON keyboard commands before normal message dispatch
-needle='''        when (type) {''';assert needle in s;s=s.replace(needle,'''        if(type=="keyboardShow"){keyboardVisibilityHandler?.invoke(true);return}
-        if(type=="keyboardHide"){keyboardVisibilityHandler?.invoke(false);return}
-        when (type) {''',1);p.write_text(s)
+needle='''        when (val type = obj.optString("type")) {''';assert needle in s
+s=s.replace(needle,'''        when (val type = obj.optString("type")) {
+            "keyboardShow" -> keyboardVisibilityHandler?.invoke(true)
+            "keyboardHide" -> keyboardVisibilityHandler?.invoke(false)''',1)
+p.write_text(s)
 print('Android V6 keyboard runtime wired: KeyboardBridgeView addContentView setKeyboardVisibilityHandler showSoftInput keyboardText')
