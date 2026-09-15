@@ -1,0 +1,69 @@
+name: Keyboard v6 Complete
+'on':
+  push:
+    branches: [keyboard-v6-complete]
+  workflow_dispatch: {}
+jobs:
+  implementation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate complete implementation inputs
+        run: |
+          test -f scripts/patch_android_keyboard_v6.py
+          test -f scripts/patch_mac_keyboard_v6.py
+          grep -q 'KeyboardBridgeView' scripts/patch_android_keyboard_v6.py
+          grep -q 'addContentView\|addView' scripts/patch_android_keyboard_v6.py
+          grep -q 'setKeyboardVisibilityHandler' scripts/patch_android_keyboard_v6.py
+          grep -q 'showSoftInput' scripts/patch_android_keyboard_v6.py
+          grep -q 'keyboardText' scripts/patch_android_keyboard_v6.py
+          grep -q 'KeyboardBridge' scripts/patch_mac_keyboard_v6.py
+          grep -q 'AXFocusedUIElement' scripts/patch_mac_keyboard_v6.py
+          grep -q 'pollAfterRemoteTouchUp' scripts/patch_mac_keyboard_v6.py
+          grep -q 'keyboardShow' scripts/patch_mac_keyboard_v6.py
+          grep -q 'keyboardText' scripts/patch_mac_keyboard_v6.py
+          grep -q 'sendControl' scripts/patch_mac_keyboard_v6.py
+  android:
+    needs: implementation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: enhancements}
+      - uses: actions/checkout@v4
+        with: {repository: josepacelli/opendisplay-android, ref: v0.0.38, path: android}
+      - run: |
+          cd android
+          python3 ../enhancements/scripts/apply_pipfix_only.py
+          python3 ../enhancements/scripts/patch_android_audio_v38.py
+          python3 ../enhancements/scripts/patch_android_keyboard_v6.py
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: android-actions/setup-android@v3
+      - name: Test and compile Android
+        run: cd android && chmod +x gradlew && ./gradlew testDebugUnitTest assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with: {name: OpenDisplay-Android-Keyboard-v6, path: android/app/build/outputs/apk/debug/app-debug.apk, if-no-files-found: error}
+  mac:
+    needs: implementation
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: enhancements}
+      - uses: actions/checkout@v4
+        with: {repository: M4st3rZeus/opendisplay, ref: d000262d29190fcb393665b6bab2a5cdd2bec2e7, path: mac}
+      - run: cd mac && python3 ../enhancements/scripts/patch_mac_keyboard_v6.py
+      - run: brew install xcodegen
+      - run: cd mac && ./generate.sh
+      - name: Compile Mac
+        run: cd mac && xcodebuild -project OpenSidecar.xcodeproj -scheme OpenSidecarMac -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean build
+      - name: Sign and verify
+        run: |
+          cd mac
+          APP=$(find build/Build/Products/Release -maxdepth 1 -type d -name '*.app' | head -1)
+          test -n "$APP"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.peetzweg.opensidecar.mac' "$APP/Contents/Info.plist"
+          codesign --force --deep --sign - --timestamp=none "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" ../OpenDisplay-macOS-Keyboard-v6.zip
+      - uses: actions/upload-artifact@v4
+        with: {name: OpenDisplay-macOS-Keyboard-v6, path: OpenDisplay-macOS-Keyboard-v6.zip, if-no-files-found: error}
